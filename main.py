@@ -2,17 +2,18 @@ import DeepQLearning as dql
 
 model = dql.DQNModel(idel_sol=None).to("cpu")
 
-# loggers = dql.train_model(model)
+save_path = r".\modelos\black-jack-v0"
+loggers = dql.train_model(model, save_path, load_checkpoint=True, load_hyperparams=False)
+
 
 ### JOGAR
-
 env = dql.env
 torch = dql.torch
 device = "cpu"
-1
 continuar = True
+
 while continuar:
-    num_episodes = 50000
+    num_episodes = 10000
     total_wins = 0
     for _ in range(num_episodes):
         cur_state = env.reset()

@@ -6,6 +6,7 @@ import numpy as np
 import random
 import gym
 import time
+import os
 
 NUM_ACOES = 2
 NUM_ESTADOS = 3
@@ -18,6 +19,19 @@ MINIBATCH_SIZE = 256
 STEPS_PER_EPISODE = 100
 TOTAL_EPISODES = 50_000
 LEARNING_RATE = 1e-5
+
+# Dicionário de hiperparâmetros
+hyperparams_dict = {'NUM_ACOES': NUM_ACOES,
+                    'NUM_ESTADOS': NUM_ESTADOS,
+                    'EPSILON_FINAL': EPSILON_FINAL,
+                    'EPSILON_DECAY': EPSILON_DECAY,
+                    'GAMMA': GAMMA,
+                    'REPLAY_MEMORY_SIZE': REPLAY_MEMORY_SIZE,
+                    'MINIBATCH_SIZE': MINIBATCH_SIZE,
+                    'STEPS_PER_EPISODE': STEPS_PER_EPISODE,
+                    'TOTAL_EPISODES': TOTAL_EPISODES,
+                    'LEARNING_RATE': LEARNING_RATE,
+                   }
 
 env = gym.make("Blackjack-v0")
 device = "cpu"
@@ -61,7 +75,7 @@ class DQNModel(nn.Module):
         return out
 
 
-def train_model(model):
+def train_model(model, save_path, load_checkpoint, load_hyperparams):
     model.optimizer = optim.Adam(model.parameters(), lr = LEARNING_RATE)
     memory = model_memory.Memory(REPLAY_MEMORY_SIZE)
     loss_func = nn.MSELoss()
@@ -71,12 +85,17 @@ def train_model(model):
     soft_accuracy_logger = []
     model.loggers = training_loss_logger, hard_accuracy_logger, soft_accuracy_logger
 
-    logger = train_agent(model, model.optimizer, memory, loss_func, STEPS_PER_EPISODE, TOTAL_EPISODES, model.loggers)
+    # Carrega Modelo
+    checkpoint_loaded = load_model(model, save_path, load_checkpoint, load_hyperparams)
+
+    # Treina
+    if not checkpoint_loaded:
+        logger = train_agent(model, model.optimizer, memory, loss_func, STEPS_PER_EPISODE, TOTAL_EPISODES, model.loggers, save_path)
 
     return model.loggers
 
 
-def train_agent(model, optimizer, memory, loss_func, n_steps, n_episodes, loggers, exp_epsilon_decay=False):
+def train_agent(model, optimizer, memory, loss_func, n_steps, n_episodes, loggers, save_path, exp_epsilon_decay=False):
     training_loss_logger, hard_accuracy_logger, soft_accuracy_logger = loggers
 
     epsilon_decrements = []
@@ -109,14 +128,21 @@ def train_agent(model, optimizer, memory, loss_func, n_steps, n_episodes, logger
         # Chamada à função de treinamento
         training_loss_logger = train_episode(model, optimizer, memory, loss_func, epsilon, n_steps, training_loss_logger)
 
-        # print(training_loss_logger)
-
         # hard_accuracy, soft_accuracy = avalia_modelo(model)
         # hard_accuracy_logger.append(hard_accuracy)
         # soft_accuracy_logger.append(soft_accuracy)
         loggers = training_loss_logger, hard_accuracy_logger, soft_accuracy_logger
 
-        """ SALVAR MODELO AQUI A CADA X EPISÓDIOS """
+        # Salva o modelo a cada 2000 episódios
+        if episode_idx % 2000 == 0 or episode_idx == model.current_episode + n_episodes:
+            torch.save({'episode_idx': episode_idx,
+                        'model_state_dict': model.state_dict(),
+                        'optimizer_state_dict': optimizer.state_dict(),
+                        'loggers': loggers,
+                        'hyperparams_dict': hyperparams_dict,
+                        'episode_idx': episode_idx}, 
+                       save_path)
+            print('Modelo Salvo')
         
         if episode_idx % 200 == 0:
             print(f'| Episódio: {episode_idx:02} | Erro em Treinamento: {training_loss_logger[episode_idx-1]:0.2f}')
@@ -203,3 +229,44 @@ def update_model(model, optimizer, loss_func, memory, loss_logger):
 
     optimizer.step()
     model.eval()
+
+
+def load_model(model, save_path, load_chekpoint=False, load_hyperparams=False):
+    if load_chekpoint:
+        if os.path.isfile(save_path):
+            check_point = torch.load(save_path)
+            model.load_state_dict(check_point['model_state_dict'])
+            model.optimizer.load_state_dict(check_point['optimizer_state_dict'])
+            model.current_episode = check_point['episode_idx']
+            model.loggers = check_point['loggers']
+            print("Checkpoint Carregado. Iniciando do episódio:", model.current_episode)
+        
+            return True 
+        else:
+            print("Checkpoint não encontrado!")
+            return False
+
+    elif load_hyperparams:
+        check_point = torch.load(save_path)
+        hyperparams_dict = check_point['hyperparams_dict']
+
+        global NUM_ACOES, NUM_ESTADOS, EPSILON_FINAL, EPSILON_FINAL, EPSILON_DECAY, GAMMA, \
+               REPLAY_MEMORY_SIZE, MINIBATCH_SIZE, STEPS_PER_EPISODE, TOTAL_EPISODES, LEARNING_RATE
+        
+        NUM_ACOES = hyperparams_dict['NUM_ACOES']
+        NUM_ESTADOS = hyperparams_dict['NUM_ESTADOS']
+        EPSILON_FINAL = ['EPSILON_FINAL']
+        EPSILON_DECAY = hyperparams_dict['EPSILON_DECAY']
+        GAMMA = hyperparams_dict['GAMMA']
+        REPLAY_MEMORY_SIZE = hyperparams_dict['REPLAY_MEMORY_SIZE']
+        MINIBATCH_SIZE = hyperparams_dict['MINIBATCH_SIZE']
+        STEPS_PER_EPISODE = hyperparams_dict['STEPS_PER_EPISODE']
+        TOTAL_EPISODES = hyperparams_dict['TOTAL_EPISODES']
+        LEARNING_RATE = hyperparams_dict['LEARNING_RATE']
+
+        print('Hiperparâmetros Carregados do Checkpoint!')
+        return False
+
+    else:
+        print('Modelo Não Carregado!')
+        return False
